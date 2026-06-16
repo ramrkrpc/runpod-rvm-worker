@@ -12,6 +12,19 @@ if not os.path.exists("/RVM"):
     subprocess.run(["git", "clone", "--depth", "1",
                     "https://github.com/PeterL1n/RobustVideoMatting", "/RVM"], check=True)
 sys.path.insert(0, "/RVM")
+
+# --- patch RVM's string-rate bug: newer PyAV's to_avrational needs .numerator
+#     (int/Fraction have it; the str f'{frame_rate:.4f}' RVM passes does NOT) ---
+_iu = "/RVM/inference_utils.py"
+try:
+    _s = open(_iu, encoding="utf-8").read()
+    if "rate=f'{frame_rate:.4f}'" in _s:
+        _s = _s.replace("rate=f'{frame_rate:.4f}'", "rate=round(frame_rate)")
+        open(_iu, "w", encoding="utf-8").write(_s)
+        print("patched RVM string-rate bug")
+except Exception as _e:
+    print("rate patch warn:", _e)
+
 from inference import convert_video  # noqa: E402
 
 MODEL = torch.hub.load("PeterL1n/RobustVideoMatting", "resnet50", trust_repo=True).cuda().eval()
