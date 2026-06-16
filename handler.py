@@ -3,7 +3,9 @@
 Input:  {"video_url": "<mp4 url>", "downsample_ratio": 0.25, "output": "alpha"|"foreground"}
 Output: {"url": "<catbox url of the matte video>"}
 """
-import os, sys, subprocess, requests, torch, runpod
+import os, sys, time, subprocess, requests, torch, runpod
+
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
 # ---- cold start: load RVM once per worker ----
 if not os.path.exists("/RVM"):
@@ -16,7 +18,7 @@ MODEL = torch.hub.load("PeterL1n/RobustVideoMatting", "resnet50", trust_repo=Tru
 
 
 def _catbox(path):
-    r = subprocess.run(["curl", "-s", "-F", "reqtype=fileupload",
+    r = subprocess.run(["curl", "-s", "-A", UA, "-F", "reqtype=fileupload",
                         "-F", f"fileToUpload=@{path}", "https://catbox.moe/user/api.php"],
                        capture_output=True, text=True)
     return r.stdout.strip()
@@ -29,8 +31,20 @@ def handler(job):
         return {"error": "missing video_url"}
     dsr = float(inp.get("downsample_ratio", 0.25))
     want = inp.get("output", "alpha")
-    with open("in.mp4", "wb") as f:
-        f.write(requests.get(url, timeout=600).content)
+    last = None
+    for _ in range(4):
+        try:
+            r = requests.get(url, timeout=600, headers={"User-Agent": UA})
+            r.raise_for_status()
+            with open("in.mp4", "wb") as f:
+                f.write(r.content)
+            last = None
+            break
+        except Exception as e:
+            last = e
+            time.sleep(3)
+    if last is not None:
+        return {"error": f"download failed: {last}"}
     common = dict(model=MODEL, input_source="in.mp4", output_type="video",
                   downsample_ratio=dsr, seq_chunk=12)
     if want == "foreground":
